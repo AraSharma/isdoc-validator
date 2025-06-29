@@ -2,7 +2,7 @@
   "required_fields": [
     "ID",
     "IssueDate",
-    "PaymentTerms/PaymentDueDate",
+    "DueDate",
     "AccountingSupplierParty/Party/PartyIdentification/ID",
     "AccountingCustomerParty/Party/PartyIdentification/ID",
     "PaymentMeans/PayeeFinancialAccount/ID",

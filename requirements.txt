@@ -1,3 +1,5 @@
 streamlit
 lxml
-pymupdf
+PyMuPDF
+pikepdf
+PyPDF2

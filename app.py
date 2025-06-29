@@ -3,7 +3,6 @@ from lxml import etree
 from pathlib import Path
 import fitz  # PyMuPDF
 import re
-import tempfile
 
 st.set_page_config(page_title="ISDOC Validátor", layout="centered")
 st.title("🧾 ISDOC Validátor (XML / ISDOC / PDF)")
@@ -14,12 +13,19 @@ xsd_path = Path("ISDOC_2013.xsd")
 def extract_embedded_file(pdf_bytes):
     try:
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-            for i in range(len(doc)):
-                for f in doc[i].get_files():
-                    if f["name"].lower().endswith(".xml") or f["name"].lower().endswith(".isdoc"):
+            # 1. Globální přílohy (document-level attachments)
+            attachments = doc.attachments()
+            for fname, info in attachments.items():
+                if fname.lower().endswith((".xml", ".isdoc")):
+                    return info["file"]
+
+            # 2. Přílohy vložené na jednotlivých stránkách (méně časté)
+            for page in doc:
+                for f in page.get_files():
+                    if f["name"].lower().endswith((".xml", ".isdoc")):
                         return f["file"]
-    except:
-        pass
+    except Exception as e:
+        st.warning(f"Chyba při čtení příloh z PDF: {e}")
     return None
 
 def extract_isdoc_from_text(pdf_bytes):

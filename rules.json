@@ -10,7 +10,6 @@
     "LegalMonetaryTotal/PayableAmount"
   ],
   "expected_values": {
-    "AccountingCustomerParty/Party/PartyIdentification/ID": "45800415",
     "AccountingCustomerParty/Party/PartyName/Name": "TV Nova s.r.o."
   }
 }

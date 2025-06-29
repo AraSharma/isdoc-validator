@@ -8,16 +8,17 @@ import re
 import json
 
 st.set_page_config(page_title="ISDOC Validátor", layout="centered")
-st.title("🧾 ISDOC Validátor")
+st.title("🧾 ISDOC Validátor (kompletní)")
 
 # Výběr pravidel podle společnosti
 st.markdown("### 🏢 Vyber společnost pro validaci")
-rule_mode = st.radio("Pravidla", ["TV Nova s.r.o.", "Jiná společnost"])
+rule_mode = st.radio("Pravidla", ["TV Nova s.r.o.", "Jiná společnost", "Vygenerovat z faktury"])
 
 rules_path = None
+custom_generated_rules = {}
 if rule_mode == "TV Nova s.r.o.":
     rules_path = Path("rules_nova.json")
-else:
+elif rule_mode == "Jiná společnost":
     custom_rules_file = st.file_uploader("Nahraj vlastní pravidla (rules.json)", type=["json"], key="rules")
     if custom_rules_file:
         rules_path = custom_rules_file
@@ -150,6 +151,36 @@ def validate_xml(xml_data: bytes, rules: dict):
         errors.append(f"Chyba při zpracování XML: {e}")
     return errors, values
 
+def generate_rules_from_xml(xml_data: bytes):
+    try:
+        root = etree.fromstring(xml_data)
+        tree = etree.ElementTree(root)
+        nsmap = root.nsmap.copy()
+        ns = {"ns": nsmap.get(None, "")}
+
+        rules = {
+            "required_fields": [],
+            "optional_fields": [],
+            "expected_values": {}
+        }
+
+        for element in root.xpath(".//*"):
+            if element.text and element.text.strip():
+                path_parts = []
+                current = element
+                while current is not None and current.tag != root.tag:
+                    tag = etree.QName(current).localname
+                    path_parts.insert(0, tag)
+                    current = current.getparent()
+                path_parts.insert(0, etree.QName(root).localname)
+                path = "/".join(path_parts)
+                rules["expected_values"][path] = element.text.strip()
+
+        return rules
+    except Exception as e:
+        st.error(f"Chyba při generování pravidel: {e}")
+        return {}
+
 if uploaded_file:
     st.markdown("### 🔍 Zpracovávám soubor...")
     xml_data, method = None, None
@@ -178,20 +209,27 @@ if uploaded_file:
 
     if xml_data:
         st.success(f"✅ ISDOC extrahován metodou: {method}")
-        try:
-            rules = json.loads(rules_path.read_text()) if isinstance(rules_path, Path) else json.load(rules_path)
-            errors, values = validate_xml(xml_data, rules)
-            if errors:
-                st.error("❌ Faktura nesplňuje požadavky:")
-                for e in errors:
-                    st.markdown(f"- {e}")
-            else:
-                st.success("✅ Faktura splňuje všechny požadavky.")
-            st.markdown("---")
-            st.markdown("### 📋 Výpis hodnot:")
-            for k, v in values.items():
-                st.markdown(f"**{k}**: {v}")
-        except Exception as e:
-            st.error(f"Chyba při načítání pravidel: {e}")
+
+        if rule_mode == "Vygenerovat z faktury":
+            rules = generate_rules_from_xml(xml_data)
+            st.markdown("### 🛠 Vygenerovaná pravidla")
+            st.code(json.dumps(rules, indent=2, ensure_ascii=False), language="json")
+            st.download_button("💾 Stáhnout pravidla jako JSON", json.dumps(rules, indent=2), file_name="rules_generated.json")
+        else:
+            try:
+                rules = json.loads(rules_path.read_text()) if isinstance(rules_path, Path) else json.load(rules_path)
+                errors, values = validate_xml(xml_data, rules)
+                if errors:
+                    st.error("❌ Faktura nesplňuje požadavky:")
+                    for e in errors:
+                        st.markdown(f"- {e}")
+                else:
+                    st.success("✅ Faktura splňuje všechny požadavky.")
+                st.markdown("---")
+                st.markdown("### 📋 Výpis hodnot:")
+                for k, v in values.items():
+                    st.markdown(f"**{k}**: {v}")
+            except Exception as e:
+                st.error(f"Chyba při načítání pravidel: {e}")
     else:
         st.error("❌ Nepodařilo se extrahovat ISDOC žádnou metodou.")

@@ -10,9 +10,22 @@ import json
 st.set_page_config(page_title="ISDOC Validátor", layout="centered")
 st.title("🧾 ISDOC Validátor (kompletní)")
 
+# Výběr pravidel podle společnosti
+st.markdown("### 🏢 Vyber společnost pro validaci")
+rule_mode = st.radio("Pravidla", ["TV Nova s.r.o.", "Jiná společnost"])
+
+rules_path = None
+if rule_mode == "TV Nova s.r.o.":
+    rules_path = Path("rules_nova.json")
+else:
+    custom_rules_file = st.file_uploader("Nahraj vlastní pravidla (rules.json)", type=["json"], key="rules")
+    if custom_rules_file:
+        rules_path = custom_rules_file
+    else:
+        st.stop()
+
 uploaded_file = st.file_uploader("Nahraj fakturu:", type=["pdf", "xml", "isdoc"])
 xsd_path = Path("ISDOC_2013.xsd")
-rules_path = Path("rules.json")
 
 def extract_with_fitz(pdf_bytes):
     try:
@@ -166,7 +179,7 @@ if uploaded_file:
     if xml_data:
         st.success(f"✅ ISDOC extrahován metodou: {method}")
         try:
-            rules = json.loads(rules_path.read_text())
+            rules = json.loads(rules_path.read_text()) if isinstance(rules_path, Path) else json.load(rules_path)
             errors, values = validate_xml(xml_data, rules)
             if errors:
                 st.error("❌ Faktura nesplňuje požadavky:")

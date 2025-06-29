@@ -1,15 +1,15 @@
 {
   "required_fields": [
-    "ID",  // Číslo faktury
-    "IssueDate",  // Datum vystavení
-    "AccountingSupplierParty/Party/PartyIdentification/ID",  // IČO dodavatele
-    "AccountingCustomerParty/Party/PartyIdentification/ID",  // IČO odběratele
-    "TaxTotal/TaxAmount",  // DPH
-    "LegalMonetaryTotal/PayableAmount"  // Celková částka
+    "ID",
+    "IssueDate",
+    "AccountingSupplierParty/Party/PartyIdentification/ID",
+    "AccountingCustomerParty/Party/PartyIdentification/ID",
+    "TaxTotal/TaxAmount",
+    "LegalMonetaryTotal/PayableAmount"
   ],
   "optional_fields": [
-    "DueDate",  // Datum splatnosti, někdy chybí nebo je jinde
-    "PaymentMeans/PayeeFinancialAccount/ID"  // Číslo účtu, někdy chybí
+    "DueDate",
+    "PaymentMeans/PayeeFinancialAccount/ID"
   ],
   "expected_values": {
     "AccountingCustomerParty/Party/PartyName/Name": "TV Nova s.r.o."

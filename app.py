@@ -8,7 +8,7 @@ import re
 import json
 
 st.set_page_config(page_title="ISDOC Validátor", layout="centered")
-st.title("🧾 ISDOC Validátor (kompletní)")
+st.title("🧾 ISDOC Validátor")
 
 # Výběr pravidel podle společnosti
 st.markdown("### 🏢 Vyber společnost pro validaci")

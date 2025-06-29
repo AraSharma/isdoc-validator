@@ -118,6 +118,14 @@ def validate_xml(xml_data: bytes, rules: dict):
             elif hasattr(result[0], "text"):
                 values[path] = result[0].text.strip()
 
+        for path in rules.get("optional_fields", []):
+            xp = "//" + "/".join([f"ns:{p}" for p in path.split("/")])
+            result = tree.xpath(xp, namespaces=ns)
+            if result and hasattr(result[0], "text"):
+                values[path] = result[0].text.strip()
+            else:
+                values[path] = "–"
+
         for path, expected in rules.get("expected_values", {}).items():
             xp = "//" + "/".join([f"ns:{p}" for p in path.split("/")])
             result = tree.xpath(xp, namespaces=ns)

@@ -6,16 +6,23 @@ import pikepdf
 from PyPDF2 import PdfReader
 import re
 import json
+import zipfile
+import io
 
 st.set_page_config(page_title="ISDOC Validátor", layout="centered")
 st.title("🧾 ISDOC Validátor (kompletní)")
 
-# Výběr pravidel podle společnosti
+# Režim validace
+st.markdown("### ⚙️ Zvol režim zpracování")
+validation_mode = st.radio("Režim", ["Jedna faktura", "Batch z více faktur"])
+
+# Výběr pravidel
 st.markdown("### 🏢 Vyber společnost pro validaci")
 rule_mode = st.radio("Pravidla", ["TV Nova s.r.o.", "Jiná společnost", "Vygenerovat z faktury"])
 
 rules_path = None
-custom_generated_rules = {}
+rules = None
+
 if rule_mode == "TV Nova s.r.o.":
     rules_path = Path("rules_nova.json")
 elif rule_mode == "Jiná společnost":
@@ -25,9 +32,13 @@ elif rule_mode == "Jiná společnost":
     else:
         st.stop()
 
-uploaded_file = st.file_uploader("Nahraj fakturu:", type=["pdf", "xml", "isdoc"])
-xsd_path = Path("ISDOC_2013.xsd")
+# Upload souboru
+if validation_mode == "Jedna faktura":
+    uploaded_files = [st.file_uploader("Nahraj fakturu:", type=["pdf", "xml", "isdoc"], key="single")]
+else:
+    uploaded_files = st.file_uploader("Nahraj více faktur (ZIP nebo víc PDF/XML)", type=["zip", "pdf", "xml", "isdoc"], accept_multiple_files=True, key="batch")
 
+# ===== Pomocné funkce =====
 def extract_with_fitz(pdf_bytes):
     try:
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
@@ -80,41 +91,6 @@ def extract_from_xrefs(pdf_bytes):
         return None, f"xref error: {e}"
     return None, None
 
-def extract_with_pikepdf(pdf_path):
-    try:
-        with pikepdf.open(pdf_path) as pdf:
-            ef_names = pdf.Root.get('/Names', {}).get('/EmbeddedFiles', {}).get('/Names', [])
-            for i in range(0, len(ef_names), 2):
-                name = ef_names[i]
-                fs = ef_names[i+1]
-                ef = fs.get('/EF')
-                if ef and '/F' in ef:
-                    stream = ef['/F']
-                    content = stream.read_bytes()
-                    if name.lower().endswith((".xml", ".isdoc")):
-                        return content, f"pikepdf: {name}"
-    except Exception as e:
-        return None, f"pikepdf error: {e}"
-    return None, None
-
-def extract_with_pypdf2(pdf_path):
-    try:
-        reader = PdfReader(pdf_path)
-        root = reader.trailer['/Root']
-        if '/Names' in root and '/EmbeddedFiles' in root['/Names']:
-            files = root['/Names']['/EmbeddedFiles']['/Names']
-            for i in range(0, len(files), 2):
-                name = files[i]
-                file_spec = files[i+1].get_object()
-                ef = file_spec['/EF']
-                stream = ef['/F'].get_object()
-                content = stream.get_data()
-                if name.lower().endswith((".xml", ".isdoc")):
-                    return content, f"pypdf2: {name}"
-    except Exception as e:
-        return None, f"pypdf2 error: {e}"
-    return None, None
-
 def validate_xml(xml_data: bytes, rules: dict):
     errors = []
     values = {}
@@ -155,15 +131,7 @@ def generate_rules_from_xml(xml_data: bytes):
     try:
         root = etree.fromstring(xml_data)
         tree = etree.ElementTree(root)
-        nsmap = root.nsmap.copy()
-        ns = {"ns": nsmap.get(None, "")}
-
-        rules = {
-            "required_fields": [],
-            "optional_fields": [],
-            "expected_values": {}
-        }
-
+        rules = {"required_fields": [], "optional_fields": [], "expected_values": {}}
         for element in root.xpath(".//*"):
             if element.text and element.text.strip():
                 path_parts = []
@@ -175,61 +143,60 @@ def generate_rules_from_xml(xml_data: bytes):
                 path_parts.insert(0, etree.QName(root).localname)
                 path = "/".join(path_parts)
                 rules["expected_values"][path] = element.text.strip()
-
         return rules
     except Exception as e:
         st.error(f"Chyba při generování pravidel: {e}")
         return {}
 
-if uploaded_file:
-    st.markdown("### 🔍 Zpracovávám soubor...")
-    xml_data, method = None, None
+# ===== Zpracování =====
+if uploaded_files:
+    for file in uploaded_files:
+        st.markdown(f"### 📄 Zpracovávám: `{file.name}`")
+        if file.name.lower().endswith(".zip"):
+            with zipfile.ZipFile(file) as archive:
+                for name in archive.namelist():
+                    with archive.open(name) as inner_file:
+                        st.markdown(f"#### 📄 `{name}`")
+                        data = inner_file.read()
+                        ext = name.lower().split(".")[-1]
+                        process_file(data, name)
+        else:
+            data = file.read()
+            process_file(data, file.name)
 
-    if uploaded_file.name.lower().endswith(".pdf"):
-        data = uploaded_file.read()
+def process_file(data, name):
+    xml_data, method = None, None
+    if name.lower().endswith(".pdf"):
         with open("temp.pdf", "wb") as f:
             f.write(data)
-
-        methods = [
-            lambda _: extract_with_fitz(data),
-            lambda _: extract_from_text(data),
-            lambda _: extract_from_binary(data),
-            lambda _: extract_from_xrefs(data),
-            lambda _: extract_with_pikepdf("temp.pdf"),
-            lambda _: extract_with_pypdf2("temp.pdf"),
-        ]
-
-        for method_fn in methods:
-            xml_data, method = method_fn("temp.pdf")
+        for extractor in [extract_with_fitz, extract_from_text, extract_from_binary, extract_from_xrefs]:
+            xml_data, method = extractor(data)
             if xml_data:
                 break
     else:
-        xml_data = uploaded_file.read()
+        xml_data = data
         method = "přímý soubor"
 
-    if xml_data:
-        st.success(f"✅ ISDOC extrahován metodou: {method}")
+    if not xml_data:
+        st.error("❌ Nepodařilo se extrahovat ISDOC.")
+        return
 
-        if rule_mode == "Vygenerovat z faktury":
-            rules = generate_rules_from_xml(xml_data)
-            st.markdown("### 🛠 Vygenerovaná pravidla")
-            st.code(json.dumps(rules, indent=2, ensure_ascii=False), language="json")
-            st.download_button("💾 Stáhnout pravidla jako JSON", json.dumps(rules, indent=2), file_name="rules_generated.json")
-        else:
-            try:
-                rules = json.loads(rules_path.read_text()) if isinstance(rules_path, Path) else json.load(rules_path)
-                errors, values = validate_xml(xml_data, rules)
-                if errors:
-                    st.error("❌ Faktura nesplňuje požadavky:")
-                    for e in errors:
-                        st.markdown(f"- {e}")
-                else:
-                    st.success("✅ Faktura splňuje všechny požadavky.")
-                st.markdown("---")
-                st.markdown("### 📋 Výpis hodnot:")
-                for k, v in values.items():
-                    st.markdown(f"**{k}**: {v}")
-            except Exception as e:
-                st.error(f"Chyba při načítání pravidel: {e}")
+    st.success(f"✅ ISDOC extrahován metodou: {method}")
+
+    if rule_mode == "Vygenerovat z faktury":
+        rules = generate_rules_from_xml(xml_data)
+        st.markdown("### 🛠 Vygenerovaná pravidla")
+        st.code(json.dumps(rules, indent=2, ensure_ascii=False), language="json")
+        st.download_button("💾 Stáhnout pravidla jako JSON", json.dumps(rules, indent=2), file_name="rules_generated.json")
     else:
-        st.error("❌ Nepodařilo se extrahovat ISDOC žádnou metodou.")
+        rules = json.loads(rules_path.read_text()) if isinstance(rules_path, Path) else json.load(rules_path)
+        errors, values = validate_xml(xml_data, rules)
+        if errors:
+            st.error("❌ Faktura nesplňuje požadavky:")
+            for e in errors:
+                st.markdown(f"- {e}")
+        else:
+            st.success("✅ Faktura splňuje všechny požadavky.")
+        st.markdown("### 📋 Výpis hodnot:")
+        for k, v in values.items():
+            st.markdown(f"**{k}**: {v}")

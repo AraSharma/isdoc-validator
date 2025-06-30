@@ -148,22 +148,6 @@ def generate_rules_from_xml(xml_data: bytes):
         st.error(f"Chyba při generování pravidel: {e}")
         return {}
 
-# ===== Zpracování =====
-if uploaded_files:
-    for file in uploaded_files:
-        st.markdown(f"### 📄 Zpracovávám: `{file.name}`")
-        if file.name.lower().endswith(".zip"):
-            with zipfile.ZipFile(file) as archive:
-                for name in archive.namelist():
-                    with archive.open(name) as inner_file:
-                        st.markdown(f"#### 📄 `{name}`")
-                        data = inner_file.read()
-                        ext = name.lower().split(".")[-1]
-                        process_file(data, name)
-        else:
-            data = file.read()
-            process_file(data, file.name)
-
 def process_file(data, name):
     xml_data, method = None, None
     if name.lower().endswith(".pdf"):
@@ -200,3 +184,19 @@ def process_file(data, name):
         st.markdown("### 📋 Výpis hodnot:")
         for k, v in values.items():
             st.markdown(f"**{k}**: {v}")
+
+# ===== Zpracování =====
+if uploaded_files:
+    for file in uploaded_files:
+        if file:
+            st.markdown(f"### 📄 Zpracovávám: `{file.name}`")
+            if file.name.lower().endswith(".zip"):
+                with zipfile.ZipFile(file) as archive:
+                    for name in archive.namelist():
+                        with archive.open(name) as inner_file:
+                            st.markdown(f"#### 📄 `{name}`")
+                            data = inner_file.read()
+                            process_file(data, name)
+            else:
+                data = file.read()
+                process_file(data, file.name)

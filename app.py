@@ -8,15 +8,15 @@ import re
 import json
 
 st.set_page_config(page_title="ISDOC Validátor", layout="centered")
-st.title("🧾 ISDOC Validátor (kompletní)")
+st.title("🧾 ISDOC Validátor")
+
+menu = st.sidebar.radio("Vyber akci", ("Validovat faktury", "Vygenerovat pravidla z faktury"))
 
 # Načtení pravidel pro různé firmy
 predefined_rules = {
     "TV Nova s.r.o.": "rules_nova.json",
     # sem lze přidat další firmy
 }
-
-uploaded_files = st.file_uploader("Nahraj jednu nebo více faktur:", type=["pdf", "xml", "isdoc"], accept_multiple_files=True)
 
 def extract_with_fitz(pdf_bytes):
     try:
@@ -170,16 +170,74 @@ def generate_rules(xml_data):
         st.error(f"Chyba při generování pravidel: {e}")
     return rules
 
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        st.markdown(f"### 🔍 Zpracovávám soubor: `{uploaded_file.name}`")
-        xml_data, method = None, None
+if menu == "Validovat faktury":
+    uploaded_files = st.file_uploader("Nahraj jednu nebo více faktur:", type=["pdf", "xml", "isdoc"], accept_multiple_files=True)
 
-        if uploaded_file.name.lower().endswith(".pdf"):
-            data = uploaded_file.read()
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            st.markdown(f"### 🔍 Zpracovávám soubor: `{uploaded_file.name}`")
+            xml_data, method = None, None
+
+            if uploaded_file.name.lower().endswith(".pdf"):
+                data = uploaded_file.read()
+                with open("temp.pdf", "wb") as f:
+                    f.write(data)
+
+                methods = [
+                    lambda _: extract_with_fitz(data),
+                    lambda _: extract_from_text(data),
+                    lambda _: extract_from_binary(data),
+                    lambda _: extract_from_xrefs(data),
+                    lambda _: extract_with_pikepdf("temp.pdf"),
+                    lambda _: extract_with_pypdf2("temp.pdf"),
+                ]
+
+                for method_fn in methods:
+                    xml_data, method = method_fn("temp.pdf")
+                    if xml_data:
+                        break
+            else:
+                xml_data = uploaded_file.read()
+                method = "přímý soubor"
+
+            if xml_data:
+                st.success(f"✅ ISDOC extrahován metodou: {method}")
+                company = detect_company(xml_data)
+                st.markdown(f"🏷 Detekovaná společnost: **{company or 'Neznámá'}**")
+                rules_path = predefined_rules.get(company)
+
+                if rules_path:
+                    try:
+                        rules = json.loads(Path(rules_path).read_text())
+                        errors, values = validate_xml(xml_data, rules)
+                        if errors:
+                            st.error("❌ Faktura nesplňuje požadavky:")
+                            for e in errors:
+                                st.markdown(f"- {e}")
+                        else:
+                            st.success("✅ Faktura splňuje všechny požadavky.")
+                        st.markdown("---")
+                        st.markdown("### 📋 Výpis hodnot:")
+                        for k, v in values.items():
+                            st.markdown(f"**{k}**: {v}")
+                    except Exception as e:
+                        st.error(f"Chyba při načítání pravidel: {e}")
+                else:
+                    st.warning("⚠ Není k dispozici validační profil pro tuto společnost.")
+                    if st.button(f"📄 Vygenerovat pravidla z faktury: {uploaded_file.name}"):
+                        generated = generate_rules(xml_data)
+                        st.download_button("💾 Stáhnout rules.json", json.dumps(generated, indent=2), file_name="rules_generated.json")
+            else:
+                st.error("❌ Nepodařilo se extrahovat ISDOC žádnou metodou.")
+
+elif menu == "Vygenerovat pravidla z faktury":
+    one_file = st.file_uploader("Nahraj jednu fakturu:", type=["pdf", "xml", "isdoc"])
+    if one_file:
+        xml_data, method = None, None
+        if one_file.name.lower().endswith(".pdf"):
+            data = one_file.read()
             with open("temp.pdf", "wb") as f:
                 f.write(data)
-
             methods = [
                 lambda _: extract_with_fitz(data),
                 lambda _: extract_from_text(data),
@@ -188,41 +246,17 @@ if uploaded_files:
                 lambda _: extract_with_pikepdf("temp.pdf"),
                 lambda _: extract_with_pypdf2("temp.pdf"),
             ]
-
             for method_fn in methods:
                 xml_data, method = method_fn("temp.pdf")
                 if xml_data:
                     break
         else:
-            xml_data = uploaded_file.read()
+            xml_data = one_file.read()
             method = "přímý soubor"
 
         if xml_data:
             st.success(f"✅ ISDOC extrahován metodou: {method}")
-            company = detect_company(xml_data)
-            st.markdown(f"🏷 Detekovaná společnost: **{company or 'Neznámá'}**")
-            rules_path = predefined_rules.get(company)
-
-            if rules_path:
-                try:
-                    rules = json.loads(Path(rules_path).read_text())
-                    errors, values = validate_xml(xml_data, rules)
-                    if errors:
-                        st.error("❌ Faktura nesplňuje požadavky:")
-                        for e in errors:
-                            st.markdown(f"- {e}")
-                    else:
-                        st.success("✅ Faktura splňuje všechny požadavky.")
-                    st.markdown("---")
-                    st.markdown("### 📋 Výpis hodnot:")
-                    for k, v in values.items():
-                        st.markdown(f"**{k}**: {v}")
-                except Exception as e:
-                    st.error(f"Chyba při načítání pravidel: {e}")
-            else:
-                st.warning("⚠ Není k dispozici validační profil pro tuto společnost.")
-                if st.button(f"📄 Vygenerovat pravidla z faktury: {uploaded_file.name}"):
-                    generated = generate_rules(xml_data)
-                    st.download_button("💾 Stáhnout rules.json", json.dumps(generated, indent=2), file_name="rules_generated.json")
+            generated = generate_rules(xml_data)
+            st.download_button("💾 Stáhnout rules.json", json.dumps(generated, indent=2), file_name="rules_generated.json")
         else:
             st.error("❌ Nepodařilo se extrahovat ISDOC žádnou metodou.")
